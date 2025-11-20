@@ -34,19 +34,19 @@ restart:
 
 init-models:
 	@echo "📥 Downloading models..."
-	docker-compose exec ollama ollama pull llama3.2:3b
+	docker compose exec ollama ollama pull llama3.2:3b
 	@echo "✅ Models downloaded"
 
 check-dirs:
 	@echo "📁 Checking directories..."
-	docker-compose exec backend ls -la /app/
-	docker-compose exec backend ls -la /app/logs/ || echo "Logs directory issue"
+	docker compose exec backend ls -la /app/
+	docker compose exec backend ls -la /app/logs/ || echo "Logs directory issue"
 
 debug:
-	docker-compose exec backend bash
+	docker compose exec backend bash
 
 clean:
-	docker-compose down -v
+	docker compose down -v
 	docker system prune -f
 
 # Полная переустановка
