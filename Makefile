@@ -14,23 +14,23 @@ help:
 	@echo "  make clean        - Remove all containers and volumes"
 
 build:
-	docker-compose build --no-cache
+	docker compose build
 
 up:
-	docker-compose up -d
+	docker compose up -d
 	@echo "⏳ Services starting..."
 	@sleep 15
 	@echo "✅ Services started. Open http://localhost"
 	@make check-dirs
 
 down:
-	docker-compose down
+	docker compose down
 
 logs:
-	docker-compose logs -f backend
+	docker compose logs -f backend
 
 restart:
-	docker-compose restart backend
+	docker compose restart backend
 
 init-models:
 	@echo "📥 Downloading models..."
