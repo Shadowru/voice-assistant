@@ -1,0 +1,54 @@
+<!-- frontend/static/index.html -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎤 Voice Assistant</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎤 Local Voice Assistant</h1>
+            <div id="status" class="status disconnected">Disconnected</div>
+        </header>
+
+        <main>
+            <div class="controls">
+                <button id="startBtn" class="btn btn-primary">
+                    <span class="icon">🎙️</span>
+                    Start Recording
+                </button>
+                <button id="stopBtn" class="btn btn-danger" disabled>
+                    <span class="icon">⏹️</span>
+                    Stop Recording
+                </button>
+            </div>
+
+            <div class="conversation">
+                <div class="message-container" id="messages">
+                    <div class="message system">
+                        <p>Привет! Я ваш голосовой ассистент. Нажмите "Start Recording" чтобы начать.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stats">
+                <div class="stat-item">
+                    <span class="stat-label">Latency:</span>
+                    <span id="latency" class="stat-value">-</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Audio Level:</span>
+                    <div id="audioLevel" class="audio-level">
+                        <div class="audio-level-bar"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

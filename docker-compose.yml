@@ -1,0 +1,137 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  # Backend API сервер
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: voice-assistant-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      - LLM_MODEL=${LLM_MODEL:-llama3.2:3b}
+      - TTS_MODEL=${TTS_MODEL:-tts_models/ru/ruslan/tacotron2-DDC}
+      - OLLAMA_HOST=ollama:11434
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - ./backend:/app
+      - model-cache:/root/.cache
+      - whisper-models:/app/models/whisper
+      - tts-models:/app/models/tts
+    depends_on:
+      ollama:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - voice-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Ollama LLM сервер
+  ollama:
+    image: ollama/ollama:latest
+    container_name: voice-assistant-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_MODELS=/root/.ollama/models
+      - OLLAMA_HOST=0.0.0.0:11434
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - voice-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Frontend (Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: voice-assistant-frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./frontend/static:/usr/share/nginx/html
+      - ./frontend/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+    networks:
+      - voice-net
+    restart: unless-stopped
+
+  # Redis (для кэширования и очередей)
+  redis:
+    image: redis:7-alpine
+    container_name: voice-assistant-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - voice-net
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # Инициализация моделей
+  model-downloader:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: voice-assistant-init
+    volumes:
+      - whisper-models:/app/models/whisper
+      - tts-models:/app/models/tts
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    command: >
+      sh -c "
+        echo 'Downloading Whisper model...' &&
+        python -c 'from faster_whisper import WhisperModel; WhisperModel(\"base\", download_root=\"/app/models/whisper\")' &&
+        echo 'Downloading LLM model...' &&
+        ollama pull llama3.2:3b &&
+        echo 'Models downloaded successfully!'
+      "
+    networks:
+      - voice-net
+
+volumes:
+  model-cache:
+  whisper-models:
+  tts-models:
+  ollama-data:
+  redis-data:
+
+networks:
+  voice-net:
+    driver: bridge
