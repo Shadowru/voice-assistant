@@ -52,7 +52,11 @@ class VoiceAssistant {
     
     async connectWebSocket() {
         return new Promise((resolve, reject) => {
-            const wsUrl = `ws://${window.location.hostname}/ws/voice`;
+            // Автоматическое определение протокола (ws или wss)
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/voice`;
+            
+            console.log('Connecting to:', wsUrl);
             this.websocket = new WebSocket(wsUrl);
             
             this.websocket.onopen = () => {

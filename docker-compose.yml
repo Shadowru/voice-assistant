@@ -2,10 +2,11 @@
 version: '3.8'
 
 services:
+  # Backend API сервер
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile.cpu
+      dockerfile: Dockerfile
     container_name: voice-assistant-backend
     ports:
       - "8000:8000"
@@ -20,12 +21,12 @@ services:
       - model-cache:/root/.cache
       - whisper-models:/app/models/whisper
       - tts-models:/app/models/tts
-      - backend-logs:/app/logs  # Добавлен volume для логов
+      - backend-logs:/app/logs
     depends_on:
       ollama:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     networks:
       - voice-net
     restart: unless-stopped
@@ -36,6 +37,7 @@ services:
       retries: 3
       start_period: 120s
 
+  # Ollama LLM сервер
   ollama:
     image: ollama/ollama:latest
     container_name: voice-assistant-ollama
@@ -56,6 +58,7 @@ services:
       retries: 5
       start_period: 60s
 
+  # Frontend (Nginx) с SSL
   frontend:
     build:
       context: ./frontend
@@ -63,15 +66,44 @@ services:
     container_name: voice-assistant-frontend
     ports:
       - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - EMAIL=${EMAIL:-admin@example.com}
+      - STAGING=${STAGING:-1}
     volumes:
       - ./frontend/static:/usr/share/nginx/html
-      - ./frontend/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+      - ./frontend/nginx.conf:/etc/nginx/templates/nginx.conf.template:ro
+      - ./frontend/nginx-ssl.conf:/etc/nginx/templates/nginx-ssl.conf.template:ro
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - voice-net
     restart: unless-stopped
+    command: "/bin/sh -c 'envsubst < /etc/nginx/templates/nginx.conf.template > /etc/nginx/nginx.conf && while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g \"daemon off;\"'"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
+  # Certbot для получения SSL сертификатов
+  certbot:
+    image: certbot/certbot:latest
+    container_name: voice-assistant-certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    depends_on:
+      - frontend
+    networks:
+      - voice-net
+
+  # Redis
   redis:
     image: redis:7-alpine
     container_name: voice-assistant-redis
@@ -95,7 +127,7 @@ volumes:
   tts-models:
   ollama-data:
   redis-data:
-  backend-logs:  # Новый volume для логов
+  backend-logs:
 
 networks:
   voice-net:
