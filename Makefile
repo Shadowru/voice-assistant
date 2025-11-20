@@ -11,21 +11,21 @@ help:
 	@echo "  make clean    - Remove all containers and volumes"
 
 build:
-	docker-compose build
+	docker compose build
 
 up:
-	docker-compose up -d
+	docker compose up -d
 	@echo "Services started. Open http://localhost"
 
 down:
-	docker-compose down
+	docker compose down
 
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 restart:
-	docker-compose restart
+	docker compose restart
 
 clean:
-	docker-compose down -v
+	docker compose down -v
 	docker system prune -f
