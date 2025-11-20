@@ -8,7 +8,6 @@ from voice_assistant import VoiceAssistant
 from prometheus_client import Counter, Histogram, generate_latest
 import time
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -19,7 +18,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Метрики Prometheus
+#Prometheus
 REQUEST_COUNT = Counter('voice_requests_total', 'Total voice requests')
 REQUEST_LATENCY = Histogram('voice_request_latency_seconds', 'Request latency')
 ACTIVE_CONNECTIONS = Counter('active_websocket_connections', 'Active WebSocket connections')
@@ -35,12 +34,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Глобальный экземпляр ассистента
 assistant = None
 
 @app.on_event("startup")
 async def startup_event():
-    """Инициализация при старте"""
     global assistant
     logger.info("Initializing Voice Assistant...")
     try:
@@ -53,7 +50,6 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Очистка при остановке"""
     global assistant
     if assistant:
         await assistant.cleanup()
@@ -87,25 +83,21 @@ async def metrics():
 
 @app.websocket("/ws/voice")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint для голосового взаимодействия"""
+    """WebSocket endpoint"""
     await websocket.accept()
     ACTIVE_CONNECTIONS.inc()
     logger.info(f"New WebSocket connection: {websocket.client}")
     
     try:
         while True:
-            # Получение аудио данных
             data = await websocket.receive_bytes()
             REQUEST_COUNT.inc()
             
             start_time = time.time()
             
-            # Обработка через ассистента
             result = await assistant.process_audio_stream(data)
             
-            # Отправка результата
             if result:
-                # Текстовый ответ
                 await websocket.send_json({
                     "type": "transcript",
                     "content": result.get("user_text", "")
@@ -116,11 +108,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     "content": result.get("assistant_text", "")
                 })
                 
-                # Аудио ответ
                 if result.get("audio"):
                     await websocket.send_bytes(result["audio"])
             
-            # Метрика задержки
             latency = time.time() - start_time
             REQUEST_LATENCY.observe(latency)
             logger.info(f"Request processed in {latency:.2f}s")
@@ -135,7 +125,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.post("/api/text")
 async def text_endpoint(text: str):
-    """REST endpoint для текстового взаимодействия"""
+    """REST endpoint пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ"""
     try:
         result = await assistant.process_text(text)
         return JSONResponse(content=result)
