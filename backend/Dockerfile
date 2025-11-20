@@ -2,7 +2,7 @@
 FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
 
 # Метаданные
-LABEL maintainer="proteyrus@gmail.com"
+LABEL maintainer="your-email@example.com"
 LABEL description="Voice Assistant Backend with Whisper, LLM, and TTS"
 
 # Переменные окружения
@@ -45,6 +45,13 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 # Создание рабочей директории
 WORKDIR /app
 
+# Создание необходимых директорий
+RUN mkdir -p /app/models/whisper \
+    /app/models/tts \
+    /app/logs \
+    /app/cache \
+    && chmod -R 777 /app/logs /app/models /app/cache
+
 # Копирование requirements
 COPY requirements.txt .
 
@@ -56,15 +63,22 @@ RUN python3.11 -m pip install --upgrade pip setuptools wheel && \
 # Копирование кода приложения
 COPY . .
 
-# Создание директорий для моделей
-RUN mkdir -p /app/models/whisper /app/models/tts /app/logs
+# Установка прав доступа
+RUN chmod +x /app/*.py || true
 
 # Экспорт портов
 EXPOSE 8000
 
 # Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Запуск приложения
-CMD ["python3.11", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Копирование entrypoint скрипта
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# Установка netcat для проверки портов
+RUN apt-get update && apt-get install -y netcat-openbsd && rm -rf /var/lib/apt/lists/*
+
+# Использование entrypoint
+ENTRYPOINT ["/app/entrypoint.sh"]
