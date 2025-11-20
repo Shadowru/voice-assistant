@@ -2,7 +2,7 @@
 version: '3.8'
 
 services:
-  # Backend API сервер
+  # Backend API
   backend:
     build:
       context: ./backend
@@ -40,7 +40,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # Ollama LLM сервер
+  # Ollama LLM
   ollama:
     image: ollama/ollama:latest
     container_name: voice-assistant-ollama
@@ -86,7 +86,7 @@ services:
       - voice-net
     restart: unless-stopped
 
-  # Redis (для кэширования и очередей)
+  # Redis
   redis:
     image: redis:7-alpine
     container_name: voice-assistant-redis
@@ -99,7 +99,6 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes
 
-  # Инициализация моделей
   model-downloader:
     build:
       context: ./backend
