@@ -1,22 +1,28 @@
 # backend/Dockerfile
 FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
 
-# Метаданные
+# РњРµС‚Р°РґР°РЅРЅС‹Рµ
 LABEL maintainer="proteyrus@gmail.com"
 LABEL description="Voice Assistant Backend with Whisper, LLM, and TTS"
 
-# Переменные окружения
+# РџРµСЂРµРјРµРЅРЅС‹Рµ РѕРєСЂСѓР¶РµРЅРёСЏ
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    CUDA_HOME=/usr/local/cuda
+    CUDA_HOME=/usr/local/cuda \
+    PATH="/usr/local/cuda/bin:${PATH}" \
+    LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 
-# Установка системных зависимостей
+# РЈСЃС‚Р°РЅРѕРІРєР° СЃРёСЃС‚РµРјРЅС‹С… Р·Р°РІРёСЃРёРјРѕСЃС‚РµР№
 RUN apt-get update && apt-get install -y \
-    python3.10 \
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y \
+    python3.11 \
+    python3.11-dev \
+    python3.11-distutils \
     python3-pip \
-    python3-dev \
     build-essential \
     git \
     wget \
@@ -25,31 +31,40 @@ RUN apt-get update && apt-get install -y \
     libsndfile1 \
     portaudio19-dev \
     libasound2-dev \
+    libportaudio2 \
+    libportaudiocpp0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Создание рабочей директории
+# РЈСЃС‚Р°РЅРѕРІРєР° pip РґР»СЏ Python 3.11
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11
+
+# РЎРѕР·РґР°РЅРёРµ СЃРёРјР»РёРЅРєРѕРІ
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+# РЎРѕР·РґР°РЅРёРµ СЂР°Р±РѕС‡РµР№ РґРёСЂРµРєС‚РѕСЂРёРё
 WORKDIR /app
 
-# Копирование requirements
+# РљРѕРїРёСЂРѕРІР°РЅРёРµ requirements
 COPY requirements.txt .
 
-# Установка Python зависимостей
-RUN pip3 install --upgrade pip setuptools wheel && \
-    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 && \
-    pip3 install -r requirements.txt
+# РЈСЃС‚Р°РЅРѕРІРєР° Python Р·Р°РІРёСЃРёРјРѕСЃС‚РµР№
+RUN python3.11 -m pip install --upgrade pip setuptools wheel && \
+    python3.11 -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 && \
+    python3.11 -m pip install -r requirements.txt
 
-# Копирование кода приложения
+# РљРѕРїРёСЂРѕРІР°РЅРёРµ РєРѕРґР° РїСЂРёР»РѕР¶РµРЅРёСЏ
 COPY . .
 
-# Создание директорий для моделей
+# РЎРѕР·РґР°РЅРёРµ РґРёСЂРµРєС‚РѕСЂРёР№ РґР»СЏ РјРѕРґРµР»РµР№
 RUN mkdir -p /app/models/whisper /app/models/tts /app/logs
 
-# Экспорт портов
+# Р­РєСЃРїРѕСЂС‚ РїРѕСЂС‚РѕРІ
 EXPOSE 8000
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Запуск приложения
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Р—Р°РїСѓСЃРє РїСЂРёР»РѕР¶РµРЅРёСЏ
+CMD ["python3.11", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

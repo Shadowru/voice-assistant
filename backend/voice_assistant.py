@@ -8,7 +8,6 @@ import asyncio
 import logging
 from typing import Optional, Dict
 import os
-from silero_vad import load_silero_vad, get_speech_timestamps
 import redis.asyncio as redis
 
 logger = logging.getLogger(__name__)
@@ -17,7 +16,7 @@ class VoiceAssistant:
     def __init__(self):
         self.whisper_model = os.getenv("WHISPER_MODEL", "base")
         self.llm_model = os.getenv("LLM_MODEL", "llama3.2:3b")
-        self.tts_model = os.getenv("TTS_MODEL", "tts_models/ru/ruslan/tacotron2-DDC")
+        self.tts_model = os.getenv("TTS_MODEL", "tts_models/en/ljspeech/tacotron2-DDC")
         self.ollama_host = os.getenv("OLLAMA_HOST", "http://ollama:11434")
         
         self.whisper = None
@@ -34,9 +33,10 @@ class VoiceAssistant:
         self.tts_loaded = False
     
     async def initialize(self):
-        """Инициализация всех моделей"""
+        """РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ РІСЃРµС… РјРѕРґРµР»РµР№"""
         try:
-            # Redis для кэширования
+            # Redis РґР»СЏ РєСЌС€РёСЂРѕРІР°РЅРёСЏ
+            logger.info("Connecting to Redis...")
             self.redis_client = await redis.from_url(
                 "redis://redis:6379",
                 encoding="utf-8",
@@ -54,28 +54,51 @@ class VoiceAssistant:
             self.whisper_loaded = True
             logger.info("Whisper model loaded")
             
-            # VAD
-            logger.info("Loading Silero VAD")
-            self.vad_model = load_silero_vad()
-            logger.info("VAD model loaded")
+            # Silero VAD (РЅРѕРІС‹Р№ API РґР»СЏ РІРµСЂСЃРёРё 6.x)
+            logger.info("Loading Silero VAD v6")
+            try:
+                # Р”Р»СЏ РІРµСЂСЃРёРё 6.x РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РЅРѕРІС‹Р№ СЃРїРѕСЃРѕР± Р·Р°РіСЂСѓР·РєРё
+                model, utils = torch.hub.load(
+                    repo_or_dir='snakers4/silero-vad',
+                    model='silero_vad',
+                    force_reload=False,
+                    onnx=False
+                )
+                self.vad_model = model
+                self.vad_utils = utils
+                (self.get_speech_timestamps, _, _, _, _) = utils
+                logger.info("VAD model loaded (v6)")
+            except Exception as e:
+                logger.warning(f"Could not load Silero VAD: {e}. Using simple energy-based VAD")
+                self.vad_model = None
             
             # TTS
             logger.info(f"Loading TTS model: {self.tts_model}")
-            self.tts = TTS(
-                model_name=self.tts_model,
-                progress_bar=False
-            )
-            if torch.cuda.is_available():
-                self.tts.to("cuda")
-            self.tts_loaded = True
-            logger.info("TTS model loaded")
+            try:
+                self.tts = TTS(
+                    model_name=self.tts_model,
+                    progress_bar=False,
+                    gpu=torch.cuda.is_available()
+                )
+                if torch.cuda.is_available():
+                    self.tts.to("cuda")
+                self.tts_loaded = True
+                logger.info("TTS model loaded")
+            except Exception as e:
+                logger.error(f"TTS loading error: {e}")
+                logger.info("TTS will be disabled")
+                self.tts_loaded = False
             
-            # Проверка Ollama
+            # РџСЂРѕРІРµСЂРєР° Ollama
             logger.info("Checking Ollama connection")
-            ollama_client = ollama.Client(host=self.ollama_host)
-            models = ollama_client.list()
-            logger.info(f"Available Ollama models: {models}")
-            self.llm_loaded = True
+            try:
+                ollama_client = ollama.Client(host=self.ollama_host)
+                models = ollama_client.list()
+                logger.info(f"Available Ollama models: {[m['name'] for m in models.get('models', [])]}")
+                self.llm_loaded = True
+            except Exception as e:
+                logger.error(f"Ollama connection error: {e}")
+                self.llm_loaded = False
             
             logger.info("All models initialized successfully")
             
@@ -84,30 +107,38 @@ class VoiceAssistant:
             raise
     
     def is_ready(self) -> bool:
-        """Проверка готовности всех компонентов"""
-        return self.whisper_loaded and self.llm_loaded and self.tts_loaded
+        """РџСЂРѕРІРµСЂРєР° РіРѕС‚РѕРІРЅРѕСЃС‚Рё РІСЃРµС… РєРѕРјРїРѕРЅРµРЅС‚РѕРІ"""
+        return self.whisper_loaded and self.llm_loaded
     
     async def process_audio_stream(self, audio_chunk: bytes) -> Optional[Dict]:
-        """Обработка входящего аудио потока"""
+        """РћР±СЂР°Р±РѕС‚РєР° РІС…РѕРґСЏС‰РµРіРѕ Р°СѓРґРёРѕ РїРѕС‚РѕРєР°"""
         try:
-            # Конвертация в numpy
+            # РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РІ numpy
             audio_np = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32) / 32768.0
             self.audio_buffer.extend(audio_np)
             
-            # VAD проверка (каждые 500ms)
+            # VAD РїСЂРѕРІРµСЂРєР° (РєР°Р¶РґС‹Рµ 500ms)
             if len(self.audio_buffer) > self.sample_rate * 0.5:
-                audio_tensor = torch.FloatTensor(self.audio_buffer)
-                
-                speech_timestamps = get_speech_timestamps(
-                    audio_tensor,
-                    self.vad_model,
-                    sampling_rate=self.sample_rate,
-                    threshold=0.5
-                )
-                
-                # Проверка окончания речи
-                if speech_timestamps and self._is_speech_ended(speech_timestamps):
-                    return await self._process_complete_utterance()
+                if self.vad_model:
+                    # РСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ Silero VAD v6
+                    audio_tensor = torch.FloatTensor(self.audio_buffer)
+                    
+                    speech_timestamps = self.get_speech_timestamps(
+                        audio_tensor,
+                        self.vad_model,
+                        sampling_rate=self.sample_rate,
+                        threshold=0.5,
+                        min_speech_duration_ms=250,
+                        min_silence_duration_ms=700
+                    )
+                    
+                    # РџСЂРѕРІРµСЂРєР° РѕРєРѕРЅС‡Р°РЅРёСЏ СЂРµС‡Рё
+                    if speech_timestamps and self._is_speech_ended(speech_timestamps):
+                        return await self._process_complete_utterance()
+                else:
+                    # РџСЂРѕСЃС‚РѕР№ VAD РЅР° РѕСЃРЅРѕРІРµ СЌРЅРµСЂРіРёРё
+                    if self._simple_vad_check():
+                        return await self._process_complete_utterance()
             
             return None
             
@@ -116,7 +147,7 @@ class VoiceAssistant:
             return None
     
     def _is_speech_ended(self, timestamps) -> bool:
-        """Определение окончания речи (пауза > 700ms)"""
+        """РћРїСЂРµРґРµР»РµРЅРёРµ РѕРєРѕРЅС‡Р°РЅРёСЏ СЂРµС‡Рё (РїР°СѓР·Р° > 700ms)"""
         if not timestamps:
             return False
         
@@ -126,8 +157,19 @@ class VoiceAssistant:
         
         return silence_duration > 0.7
     
+    def _simple_vad_check(self) -> bool:
+        """РџСЂРѕСЃС‚Р°СЏ РїСЂРѕРІРµСЂРєР° VAD РЅР° РѕСЃРЅРѕРІРµ СЌРЅРµСЂРіРёРё СЃРёРіРЅР°Р»Р°"""
+        if len(self.audio_buffer) < self.sample_rate * 2:  # РјРёРЅРёРјСѓРј 2 СЃРµРєСѓРЅРґС‹
+            return False
+        
+        # РџСЂРѕРІРµСЂРєР° РїРѕСЃР»РµРґРЅРёС… 700ms РЅР° С‚РёС€РёРЅСѓ
+        last_chunk = self.audio_buffer[-int(self.sample_rate * 0.7):]
+        energy = np.sum(np.abs(last_chunk)) / len(last_chunk)
+        
+        return energy < 0.01  # РїРѕСЂРѕРі С‚РёС€РёРЅС‹
+    
     async def _process_complete_utterance(self) -> Dict:
-        """Полная обработка: STT -> LLM -> TTS"""
+        """РџРѕР»РЅР°СЏ РѕР±СЂР°Р±РѕС‚РєР°: STT -> LLM -> TTS"""
         audio_data = np.array(self.audio_buffer)
         self.audio_buffer = []
         
@@ -143,7 +185,9 @@ class VoiceAssistant:
         logger.info(f"Assistant: {assistant_text}")
         
         # 3. Text-to-Speech
-        audio_response = await self._synthesize_speech(assistant_text)
+        audio_response = None
+        if self.tts_loaded:
+            audio_response = await self._synthesize_speech(assistant_text)
         
         return {
             "user_text": user_text,
@@ -152,7 +196,7 @@ class VoiceAssistant:
         }
     
     async def _transcribe(self, audio: np.ndarray) -> str:
-        """Транскрипция аудио через Whisper"""
+        """РўСЂР°РЅСЃРєСЂРёРїС†РёСЏ Р°СѓРґРёРѕ С‡РµСЂРµР· Whisper"""
         try:
             segments, info = self.whisper.transcribe(
                 audio,
@@ -173,26 +217,26 @@ class VoiceAssistant:
             return ""
     
     async def _get_llm_response(self, text: str) -> str:
-        """Получение ответа от LLM через Ollama"""
+        """РџРѕР»СѓС‡РµРЅРёРµ РѕС‚РІРµС‚Р° РѕС‚ LLM С‡РµСЂРµР· Ollama"""
         try:
-            # Проверка кэша
+            # РџСЂРѕРІРµСЂРєР° РєСЌС€Р°
             cache_key = f"llm:{hash(text)}"
             cached = await self.redis_client.get(cache_key)
             if cached:
                 logger.info("Using cached LLM response")
                 return cached
             
-            # Добавление в историю
+            # Р”РѕР±Р°РІР»РµРЅРёРµ РІ РёСЃС‚РѕСЂРёСЋ
             self.conversation_history.append({
                 "role": "user",
                 "content": text
             })
             
-            # Ограничение истории (последние 10 сообщений)
+            # РћРіСЂР°РЅРёС‡РµРЅРёРµ РёСЃС‚РѕСЂРёРё (РїРѕСЃР»РµРґРЅРёРµ 10 СЃРѕРѕР±С‰РµРЅРёР№)
             if len(self.conversation_history) > 10:
                 self.conversation_history = self.conversation_history[-10:]
             
-            # Запрос к Ollama
+            # Р—Р°РїСЂРѕСЃ Рє Ollama
             client = ollama.Client(host=self.ollama_host)
             response = client.chat(
                 model=self.llm_model,
@@ -202,28 +246,28 @@ class VoiceAssistant:
             
             assistant_text = response['message']['content']
             
-            # Добавление ответа в историю
+            # Р”РѕР±Р°РІР»РµРЅРёРµ РѕС‚РІРµС‚Р° РІ РёСЃС‚РѕСЂРёСЋ
             self.conversation_history.append({
                 "role": "assistant",
                 "content": assistant_text
             })
             
-            # Кэширование
+            # РљСЌС€РёСЂРѕРІР°РЅРёРµ
             await self.redis_client.setex(cache_key, 3600, assistant_text)
             
             return assistant_text
             
         except Exception as e:
             logger.error(f"LLM error: {e}")
-            return "Извините, произошла ошибка при обработке запроса."
+            return "РР·РІРёРЅРёС‚Рµ, РїСЂРѕРёР·РѕС€Р»Р° РѕС€РёР±РєР° РїСЂРё РѕР±СЂР°Р±РѕС‚РєРµ Р·Р°РїСЂРѕСЃР°."
     
     async def _synthesize_speech(self, text: str) -> bytes:
-        """Синтез речи через TTS"""
+        """РЎРёРЅС‚РµР· СЂРµС‡Рё С‡РµСЂРµР· TTS"""
         try:
-            # Генерация аудио
-            wav = self.tts.tts(text=text, language="ru")
+            # Р“РµРЅРµСЂР°С†РёСЏ Р°СѓРґРёРѕ
+            wav = self.tts.tts(text=text)
             
-            # Конвертация в int16 bytes
+            # РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РІ int16 bytes
             audio_array = np.array(wav)
             audio_int16 = (audio_array * 32767).astype(np.int16)
             
@@ -234,7 +278,7 @@ class VoiceAssistant:
             return b""
     
     async def process_text(self, text: str) -> Dict:
-        """Обработка текстового запроса (без аудио)"""
+        """РћР±СЂР°Р±РѕС‚РєР° С‚РµРєСЃС‚РѕРІРѕРіРѕ Р·Р°РїСЂРѕСЃР° (Р±РµР· Р°СѓРґРёРѕ)"""
         assistant_text = await self._get_llm_response(text)
         return {
             "user_text": text,
@@ -242,7 +286,7 @@ class VoiceAssistant:
         }
     
     async def cleanup(self):
-        """Очистка ресурсов"""
+        """РћС‡РёСЃС‚РєР° СЂРµСЃСѓСЂСЃРѕРІ"""
         if self.redis_client:
             await self.redis_client.close()
         logger.info("Cleanup completed")
